@@ -84,7 +84,7 @@ def gitconfig_get(name, file=None):
         args += ["--file", file]
     args.append(name)
     p = subprocess.Popen(args, stdout=subprocess.PIPE)
-    output = p.communicate()[0].strip()
+    output = p.communicate()[0].strip().decode("utf-8")
     if p.returncode and file is None:
         return None
     elif p.returncode:
@@ -106,9 +106,11 @@ class GitFat(object):
 
     def __init__(self):
         try:
-            self.gitroot = subprocess.check_output(
-                "git rev-parse --show-toplevel".split()
-            ).strip()
+            self.gitroot = (
+                subprocess.check_output("git rev-parse --show-toplevel".split())
+                .strip()
+                .decode("utf-8")
+            )
         except subprocess.CalledProcessError:
             sys.exit(1)
         self.gitdir = (
@@ -255,7 +257,7 @@ class GitFat(object):
                             ishanging = True  # Working tree version is verbatim from repository (not smudged)
                             outstream = outstreamclean
                         firstblock = False
-                    h.update(block)
+                    h.update(block.encode("utf-8"))
                     bytes += len(block)
                     outstream.write(block)
                 outstream.flush()
@@ -319,7 +321,10 @@ class GitFat(object):
 
         def cut_sha1hash(input, output):
             for line in input:
-                output.write(line.split()[0] + "\n")
+                line = line.decode("utf-8")
+                to_write = line.split()[0] + "\n"
+                to_write = to_write.encode("utf-8")
+                output.write(to_write)
             output.close()
 
         # ...`cat-file --batch-check` filters for git-fat object candidates in bulk...
@@ -331,9 +336,11 @@ class GitFat(object):
 
         def filter_gitfat_candidates(input, output):
             for line in input:
-                objhash, objtype, size = line.split()
+                objhash, objtype, size = line.decode("utf-8").split()
                 if objtype == "blob" and int(size) in self.magiclens:
-                    output.write(objhash + "\n")
+                    to_write = objhash + "\n"
+                    to_write = to_write.encode("utf-8")
+                    output.write(to_write)
             output.close()
 
         # ...`cat-file --batch` provides full contents of git-fat candidates in bulk
@@ -354,6 +361,7 @@ class GitFat(object):
             metadata_line = p3.stdout.readline()
             if not metadata_line:
                 break  # EOF
+            metadata_line = metadata_line.decode("utf-8")
             objhash, objtype, size_str = metadata_line.split()
             size, bytes_read = int(size_str), 0
             # We know from filter that item is a candidate git-fat object and
@@ -363,6 +371,7 @@ class GitFat(object):
                 data = p3.stdout.read(size - bytes_read)
                 if not data:
                     break  # EOF
+                data = data.decode("utf-8")
                 content += data
                 bytes_read += len(data)
             try:
@@ -383,15 +392,18 @@ class GitFat(object):
         p1.wait()
         p2.wait()
         p3.wait()
+        print(f"Referenced objects: {referenced}")
         return referenced
 
     def orphan_files(self, patterns=[]):
         "generator for all orphan placeholders in the working tree"
         if not patterns or patterns == [""]:
             patterns = ["."]
-        for fname in subprocess.check_output(
-            ["git", "ls-files", "-z"] + patterns
-        ).split("\x00")[:-1]:
+        for fname in (
+            subprocess.check_output(["git", "ls-files", "-z"] + patterns)
+            .decode("utf-8")
+            .split("\x00")[:-1]
+        ):
             digest = self.decode_file(fname)[0]
             if digest:
                 yield (digest, fname)
@@ -430,7 +442,7 @@ class GitFat(object):
         cmd = self.get_rsync_command(push=True)
         logger.debug("Executing: %s" % " ".join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        p.communicate(input="\x00".join(files))
+        p.communicate(input=b"\x00".join((f.encode("utf-8") for f in files)))
         if p.returncode:
             sys.exit(p.returncode)
 
@@ -474,10 +486,11 @@ class GitFat(object):
             if rev:
                 refargs["rev"] = rev
         files = self.filter_objects(refargs, self.parse_pull_patterns(args))
+        files = (f.encode("utf-8") for f in files)
         cmd = self.get_rsync_command(push=False)
         logger.debug("Executing: %s" % " ".join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        p.communicate(input="\x00".join(files))
+        p.communicate(input=b"\x00".join(files))
         if p.returncode:
             sys.exit(p.returncode)
         self.checkout()
@@ -518,7 +531,7 @@ class GitFat(object):
             fname = os.path.join(self.objdir, obj)
             h = hashlib.new("sha1")
             for block in readblocks(open(fname)):
-                h.update(block)
+                h.update(block.encode("utf-8"))
             data_hash = h.hexdigest()
             if obj != data_hash:
                 corrupted_objects.append((obj, data_hash))
