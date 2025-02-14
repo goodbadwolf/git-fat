@@ -23,14 +23,6 @@ def setup_logging():
     logging.basicConfig(stream=sys.stderr, level=log_level, format="%(message)s")
 
 
-def verbose_stderr(*args, **kwargs):
-    logger.debug(*args, **kwargs)
-
-
-def verbose_ignore(*args, **kwargs):
-    pass
-
-
 def mkdir_p(path):
     os.makedirs(path, exist_ok=True)
 
@@ -113,9 +105,6 @@ class GitFat(object):
     DecodeError = RuntimeError
 
     def __init__(self):
-        self.verbose = (
-            verbose_stderr if os.environ.get("GIT_FAT_VERBOSE") else verbose_ignore
-        )
         try:
             self.gitroot = subprocess.check_output(
                 "git rev-parse --show-toplevel".split()
@@ -168,9 +157,9 @@ class GitFat(object):
     def get_rsync_command(self, push):
         (remote, ssh_port, ssh_user, options) = self.get_rsync()
         if push:
-            self.verbose("Pushing to %s" % (remote))
+            logger.debug("Pushing to %s" % (remote))
         else:
-            self.verbose("Pulling from %s" % (remote))
+            logger.debug("Pulling from %s" % (remote))
 
         cmd = ["rsync", "--progress", "--ignore-existing", "--from0", "--files-from=-"]
         rshopts = ""
@@ -274,7 +263,7 @@ class GitFat(object):
             objfile = os.path.join(self.objdir, digest)
             if not ishanging:
                 if os.path.exists(objfile):
-                    self.verbose(
+                    logging.debug(
                         "git-fat filter-clean: cache already exists %s" % objfile
                     )
                     os.remove(tmpname)
@@ -282,7 +271,7 @@ class GitFat(object):
                     # Set permissions for the new file using the current umask
                     os.chmod(tmpname, int("444", 8) & ~umask())
                     os.rename(tmpname, objfile)
-                    self.verbose("git-fat filter-clean: caching to %s" % objfile)
+                    logger.debug("git-fat filter-clean: caching to %s" % objfile)
                 cached = True
                 outstreamclean.write(self.encode(digest, bytes))
         finally:
@@ -304,14 +293,14 @@ class GitFat(object):
             objfile = os.path.join(self.objdir, result)
             try:
                 cat(open(objfile), sys.stdout)
-                self.verbose("git-fat filter-smudge: restoring from %s" % objfile)
+                logger.debug("git-fat filter-smudge: restoring from %s" % objfile)
             except IOError:  # file not found
-                self.verbose("git-fat filter-smudge: fat object missing %s" % objfile)
+                logger.debug("git-fat filter-smudge: fat object missing %s" % objfile)
                 sys.stdout.write(
                     self.encode(result, bytes)
                 )  # could leave a better notice about how to recover this file
         else:  # We have an iterable over the original input.
-            self.verbose("git-fat filter-smudge: not a managed file")
+            logger.debug("git-fat filter-smudge: not a managed file")
             cat_iter(result, sys.stdout)
 
     def catalog_objects(self):
@@ -418,15 +407,15 @@ class GitFat(object):
         orphans = referenced - catalog
         if "--all" in args:
             for obj in referenced:
-                print(obj)
+                logger.info(obj)
         if orphans:
-            print("Orphan objects:")
+            logger.info("Orphan objects:")
             for orph in orphans:
-                print("    " + orph)
+                logger.info("    " + orph)
         if garbage:
-            print("Garbage objects:")
+            logger.info("Garbage objects:")
             for g in garbage:
-                print("    " + g)
+                logger.info("    " + g)
 
     def is_dirty(self):
         return subprocess.call(["git", "diff-index", "--quiet", "HEAD"]) == 0
@@ -439,7 +428,7 @@ class GitFat(object):
         pushall = "--all" in args
         files = self.referenced_objects(all=pushall) & self.catalog_objects()
         cmd = self.get_rsync_command(push=True)
-        self.verbose("Executing: %s" % " ".join(cmd))
+        logger.debug("Executing: %s" % " ".join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input="\x00".join(files))
         if p.returncode:
@@ -451,7 +440,7 @@ class GitFat(object):
         for digest, fname in self.orphan_files():
             objpath = os.path.join(self.objdir, digest)
             if os.access(objpath, os.R_OK):
-                print("Restoring %s -> %s" % (digest, fname))
+                logger.info("Restoring %s -> %s" % (digest, fname))
                 # The output of our smudge filter depends on the existence of
                 # the file in .git/fat/objects, but git caches the file stat
                 # from the previous time the file was smudged, therefore it
@@ -470,7 +459,7 @@ class GitFat(object):
                     ["git", "checkout-index", "--index", "--force", fname]
                 )
             elif show_orphans:
-                print("Data unavailable: %s %s" % (digest, fname))
+                logger.info("Data unavailable: %s %s" % (digest, fname))
 
     def cmd_pull(self, args):
         "Pull anything that I have referenced, but not stored"
@@ -486,7 +475,7 @@ class GitFat(object):
                 refargs["rev"] = rev
         files = self.filter_objects(refargs, self.parse_pull_patterns(args))
         cmd = self.get_rsync_command(push=False)
-        self.verbose("Executing: %s" % " ".join(cmd))
+        logger.debug("Executing: %s" % " ".join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input="\x00".join(files))
         if p.returncode:
@@ -516,10 +505,10 @@ class GitFat(object):
 
     def cmd_gc(self):
         garbage = self.catalog_objects() - self.referenced_objects()
-        print("Unreferenced objects to remove: %d" % len(garbage))
+        logger.info("Unreferenced objects to remove: %d" % len(garbage))
         for obj in garbage:
             fname = os.path.join(self.objdir, obj)
-            print("%10d %s" % (os.stat(fname).st_size, obj))
+            logger.info("%10d %s" % (os.stat(fname).st_size, obj))
             os.remove(fname)
 
     def cmd_verify(self):
@@ -534,19 +523,21 @@ class GitFat(object):
             if obj != data_hash:
                 corrupted_objects.append((obj, data_hash))
         if corrupted_objects:
-            print("Corrupted objects: %d" % len(corrupted_objects))
+            logger.info("Corrupted objects: %d" % len(corrupted_objects))
             for obj, data_hash in corrupted_objects:
-                print("%s data hash is %s" % (obj, data_hash))
+                logger.info("%s data hash is %s" % (obj, data_hash))
             sys.exit(1)
 
     def cmd_init(self):
         self.setup()
         if self.is_init_done():
-            print("Git fat already configured, check configuration in .git/config")
+            logger.info(
+                "Git fat already configured, check configuration in .git/config"
+            )
         else:
             gitconfig_set("filter.fat.clean", "git-fat filter-clean")
             gitconfig_set("filter.fat.smudge", "git-fat filter-smudge")
-            print("Initialized git fat")
+            logger.info("Initialized git fat")
 
     def gen_large_blobs(self, revs, threshsize):
         """Build dict of all blobs"""
@@ -591,7 +582,7 @@ class GitFat(object):
         objcheck.wait()
         hashonly.join()
         time1 = time.time()
-        self.verbose(
+        logger.debug(
             "%d of %d blobs are >= %d bytes [elapsed %.3fs]"
             % (numlarge, numblobs, threshsize, time1 - time0)
         )
@@ -625,12 +616,12 @@ class GitFat(object):
             if bsize:  # We care about this blob
                 pathsizes[path].add(bsize)
         time1 = time.time()
-        self.verbose("Found %d paths in %.3f s" % (len(pathsizes), time1 - time0))
+        logger.debug("Found %d paths in %.3f s" % (len(pathsizes), time1 - time0))
         maxlen = max(map(len, pathsizes)) if pathsizes else 0
         for path, sizes in sorted(
             pathsizes.items(), key=lambda ps: max(ps[1]), reverse=True
         ):
-            print(
+            logger.info(
                 "%-*s filter=fat -text # %10d %d"
                 % (maxlen, path, max(sizes), len(sizes))
             )
@@ -740,7 +731,6 @@ if __name__ == "__main__":
     elif cmd == "index-filter":
         fat.cmd_index_filter(sys.argv[2:])
     else:
-        print(
-            "Usage: git fat [init|status|push|pull|gc|verify|checkout|find|index-filter]",
-            file=sys.stderr,
+        logger.info(
+            "Usage: git fat [init|status|push|pull|gc|verify|checkout|find|index-filter]"
         )
