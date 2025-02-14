@@ -1,0 +1,7 @@
+[project]
+name = "git-fat"
+version = "0.1.0"
+description = "`git-fat` is a tool to manage large files in git repositories, without storing them in the repository."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
