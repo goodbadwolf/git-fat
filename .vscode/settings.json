@@ -1,0 +1,12 @@
+{
+  "repomix.runner.keepOutputFile": true,
+  "repomix.output.removeEmptyLines": true,
+  "repomix.ignore.customPatterns": [
+    "external",
+    ".gitignore",
+    "uv.lock",
+    ".gitmodules",
+    "git-fat.spec",
+    "LICENSE"
+  ]
+}
