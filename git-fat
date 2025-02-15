@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def setup_logging():
     log_level = logging.DEBUG if os.environ.get("GIT_FAT_VERBOSE") else logging.INFO
-    logging.basicConfig(stream=sys.stderr, level=log_level, format="%(message)s")
+    logging.basicConfig(stream=sys.stdout, level=log_level, format="%(message)s")
 
 
 def mkdir_p(path):
@@ -140,10 +140,8 @@ class GitFat(object):
 
     def assert_init_done(self):
         if not self.is_init_done():
-            sys.stderr.write(
-                "fatal: git-fat is not yet configured in this repository.\n"
-            )
-            sys.stderr.write('Run "git fat init" to configure.\n')
+            logging.error("git-fat is not yet configured in this repository.\n")
+            logging.info('Run "git fat init" to configure.\n')
             sys.exit(1)
 
     def get_rsync(self):
@@ -392,7 +390,6 @@ class GitFat(object):
         p1.wait()
         p2.wait()
         p3.wait()
-        print(f"Referenced objects: {referenced}")
         return referenced
 
     def orphan_files(self, patterns=[]):
